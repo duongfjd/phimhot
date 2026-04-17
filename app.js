@@ -7,7 +7,14 @@ const state = {
     currentMovie: null,
     searchKeyword: '',
     page: 1,
-    type: '' // single, series, hoathinh
+    type: '', // single, series, hoathinh
+    categories: [],
+    countries: [],
+    filters: {
+        category: '',
+        country: '',
+        year: ''
+    }
 };
 
 // --- DOM Elements ---
@@ -34,50 +41,21 @@ async function fetchAPI(endpoint) {
     }
 }
 
-// Check if a movie has any episodes with links
-async function getWatchableDetail(slug) {
-    try {
-        const response = await fetch(`${API_BASE}/phim/${slug}`, {
-            headers: { 'accept': 'application/json' }
-        });
-        const data = await response.json();
-        if (data && data.episodes && data.episodes.length > 0) {
-            const hasLinks = data.episodes.some(server => 
-                server.server_data && 
-                server.server_data.length > 0 && 
-                typeof server.server_data[0].link_embed === 'string' &&
-                server.server_data[0].link_embed.startsWith('http')
-            );
-            if (hasLinks) return data;
-        }
-        return null;
-    } catch (e) {
-        return null;
-    }
-}
-
-// Filter a list of movies by availability
-async function filterWatchableMovies(items) {
-    if (!items || items.length === 0) return [];
-    
-    // Fetch details in parallel to speed up verification
-    const results = await Promise.all(items.map(movie => getWatchableDetail(movie.slug)));
-    
-    // Map back: preserve original movie info but store the details too
-    return results
-        .map((fullData, index) => {
-            if (!fullData) return null;
-            return {
-                ...items[index],
-                fullData: fullData // This is the entire response object from /phim/[slug]
-            };
-        })
-        .filter(item => item !== null);
-}
-
 // --- Router ---
 function navigate(view, params = {}) {
     state.view = view;
+    // Reset filters if navigating to a new list type or home
+    if (view === 'home') {
+        state.filters = { category: '', country: '', year: '' };
+    }
+    
+    // Update state filters if provided
+    if (params.filters) {
+        state.filters = { ...state.filters, ...params.filters };
+    } else if (view === 'list' && !params.category && !params.country && !params.year) {
+        // Keep current filters if navigating within lists unless explicitly reset
+    }
+
     window.scrollTo({ top: 0, behavior: 'smooth' });
     
     if (view === 'home') {
@@ -85,7 +63,7 @@ function navigate(view, params = {}) {
     } else if (view === 'detail') {
         renderDetail(params.slug, params.detail);
     } else if (view === 'list') {
-        renderList(params.type, params.keyword);
+        renderList(params);
     }
 }
 
@@ -99,17 +77,15 @@ async function renderHome() {
         return;
     }
 
-    // Filter to show only watchable movies
-    const watchableItems = await filterWatchableMovies(data.items);
     hideLoader();
 
-    if (watchableItems.length === 0) {
-        appView.innerHTML = `<section><h2 class="section-title">Hiện tại không có phim nào mới có link xem.</h2></section>`;
+    if (data.items.length === 0) {
+        appView.innerHTML = `<section><h2 class="section-title">Hiện tại không có phim nào mới.</h2></section>`;
         return;
     }
 
-    const featured = watchableItems[0];
-    const latest = watchableItems.slice(1, 13);
+    const featured = data.items[0];
+    const latest = data.items.slice(1, 13);
 
     appView.innerHTML = `
         <div class="hero">
@@ -123,17 +99,17 @@ async function renderHome() {
                     <span>${featured.origin_name || ''}</span>
                 </div>
                 <div class="hero-btns">
-                    <button class="btn btn-primary" onclick='window.router.detail("${featured.slug}", ${JSON.stringify(featured.fullData).replace(/'/g, "&apos;")})'>
+                    <button class="btn btn-primary" onclick='window.router.detail("${featured.slug}")'>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Phát Phim
                     </button>
-                    <button class="btn btn-secondary" onclick='window.router.detail("${featured.slug}", ${JSON.stringify(featured.fullData).replace(/'/g, "&apos;")})'>Thông Tin</button>
+                    <button class="btn btn-secondary" onclick='window.router.detail("${featured.slug}")'>Thông Tin</button>
                 </div>
             </div>
         </div>
 
         <section>
             <div class="section-header">
-                <h2 class="section-title">Phim Mới Có Link Xem</h2>
+                <h2 class="section-title">Phim Mới Cập Nhật</h2>
             </div>
             <div class="movie-grid">
                 ${latest.map(movie => renderMovieCard(movie)).join('')}
@@ -207,53 +183,129 @@ async function renderDetail(slug, cachedData = null) {
     hideLoader();
 }
 
-async function renderList(type, keyword = '') {
+async function renderList(params = {}) {
+    const { type, keyword } = params;
+    const { category, country, year } = state.filters;
+    
     let endpoint = "/danh-sach";
     let title = "Danh Sách Phim";
 
+    // Build query params
+    const queryParams = new URLSearchParams();
+    if (keyword) queryParams.append('keyword', keyword);
+    if (type && type !== 'all') queryParams.append('type', type);
+    if (category) queryParams.append('category', category);
+    if (country) queryParams.append('country', country);
+    if (year) queryParams.append('year', year);
+    queryParams.append('limit', '24');
+
     if (keyword) {
-        endpoint = `/tim-kiem?keyword=${encodeURIComponent(keyword)}&limit=24`; // Increase limit since we filter
+        endpoint = `/tim-kiem?${queryParams.toString()}`;
         title = `Kết quả tìm kiếm: "${keyword}"`;
-    } else if (type && type !== 'all') {
-        endpoint = `/danh-sach?type=${type}&limit=24&status=completed`; // Prefer completed for lists
-        title = type === 'series' ? 'Phim Bộ Mới' : (type === 'hoathinh' ? 'Hoạt Hình Mới' : 'Phim Lẻ Mới');
-    } else if (type === 'all') {
-        endpoint = "/danh-sach/phim-moi-cap-nhat?limit=24";
-        title = "Tất Cả Phim Mới";
+    } else {
+        endpoint = `/danh-sach?${queryParams.toString()}`;
+        if (type === 'series') title = 'Phim Bộ Mới';
+        else if (type === 'hoathinh') title = 'Hoạt Hình Mới';
+        else if (type === 'movie') title = 'Phim Lẻ Mới';
+        else if (type === 'all') title = 'Tất Cả Phim Mới';
+    }
+
+    // Special case for specific category/country titles
+    if (category && !type && !keyword) {
+        const cat = state.categories.find(c => c.slug === category);
+        if (cat) title = `Phim Thể Loại: ${cat.name}`;
+    }
+    if (country && !type && !keyword) {
+        const cou = state.countries.find(c => c.slug === country);
+        if (cou) title = `Phim Quốc Gia: ${cou.name}`;
     }
 
     const data = await fetchAPI(endpoint);
     if (!data || !data.items) {
-        appView.innerHTML = `<section><h2 class="section-title">Không tìm thấy phim yêu cầu.</h2></section>`;
+        appView.innerHTML = `
+            <section style="margin-top: 80px;">
+                ${renderFilterBar()}
+                <h2 class="section-title">Không tìm thấy phim yêu cầu.</h2>
+            </section>`;
         hideLoader();
         return;
     }
 
-    // Filter to show only watchable movies
-    const watchableItems = await filterWatchableMovies(data.items);
     hideLoader();
 
     appView.innerHTML = `
         <section style="margin-top: 80px;">
             <div class="section-header">
                 <h2 class="section-title">${title}</h2>
-                <div style="font-size: 0.8rem; color: var(--text-secondary);">Đã lọc bỏ phim chưa có link xem</div>
             </div>
+            ${renderFilterBar()}
             <div class="movie-grid">
-                ${watchableItems.length > 0 ? watchableItems.map(movie => renderMovieCard(movie)).join('') : '<p>Không có phim nào có link xem sẵn sàng.</p>'}
+                ${data.items.length > 0 ? data.items.map((movie, idx) => renderMovieCard(movie, idx)).join('') : '<p>Không tìm thấy phim yêu cầu với bộ lọc hiện tại.</p>'}
             </div>
         </section>
     `;
     
     if (type) updateActiveNavItem(type);
+    attachFilterListeners();
 }
 
-function renderMovieCard(movie) {
-    const detailAttr = movie.fullData ? `window.router.detail("${movie.slug}", ${JSON.stringify(movie.fullData).replace(/'/g, "&apos;")})` : `window.router.detail("${movie.slug}")`;
-    const poster = typeof movie.poster_url === 'string' ? movie.poster_url : (movie.thumb_url || '');
+function renderFilterBar() {
+    const years = [];
+    const currentYear = new Date().getFullYear();
+    for (let i = currentYear; i >= 2010; i--) years.push(i);
 
     return `
-        <div class="movie-card animate-in" onclick='${detailAttr}'>
+        <div class="filter-bar animate-in">
+            <div class="filter-group">
+                <label>Thể loại</label>
+                <select id="filter-category" class="custom-select">
+                    <option value="">Tất cả</option>
+                    ${state.categories.map(c => `<option value="${c.slug}" ${state.filters.category === c.slug ? 'selected' : ''}>${c.name}</option>`).join('')}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Quốc gia</label>
+                <select id="filter-country" class="custom-select">
+                    <option value="">Tất cả</option>
+                    ${state.countries.map(c => `<option value="${c.slug}" ${state.filters.country === c.slug ? 'selected' : ''}>${c.name}</option>`).join('')}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Năm</label>
+                <select id="filter-year" class="custom-select">
+                    <option value="">Tất cả</option>
+                    ${years.map(y => `<option value="${y}" ${state.filters.year == y ? 'selected' : ''}>${y}</option>`).join('')}
+                </select>
+            </div>
+            <button class="btn-clear" onclick="clearFilters()">Xóa Lọc</button>
+        </div>
+    `;
+}
+
+function attachFilterListeners() {
+    ['category', 'country', 'year'].forEach(f => {
+        const el = document.getElementById(`filter-${f}`);
+        if (el) {
+            el.onchange = (e) => {
+                const newFilters = { ...state.filters, [f]: e.target.value };
+                navigate('list', { filters: newFilters });
+            };
+        }
+    });
+}
+
+window.clearFilters = () => {
+    state.filters = { category: '', country: '', year: '' };
+    navigate('list');
+};
+
+function renderMovieCard(movie, index = 0) {
+    const detailAttr = `window.router.detail("${movie.slug}")`;
+    const poster = typeof movie.poster_url === 'string' ? movie.poster_url : (movie.thumb_url || '');
+    const delay = index * 0.05;
+
+    return `
+        <div class="movie-card animate-in" style="animation-delay: ${delay}s" onclick='${detailAttr}'>
             <img src="${poster}" class="card-img" alt="${movie.name}" loading="lazy">
             <div class="card-overlay">
                 <div class="card-title">${movie.name}</div>
@@ -270,6 +322,16 @@ function renderMovieCard(movie) {
 }
 
 // --- Utilities ---
+
+async function initFilters() {
+    const [catData, counData] = await Promise.all([
+        fetch(`${API_BASE}/the-loai`).then(r => r.json()),
+        fetch(`${API_BASE}/quoc-gia`).then(r => r.json())
+    ]);
+    
+    if (catData && catData.data) state.categories = catData.data.items;
+    if (counData && counData.data) state.countries = counData.data.items;
+}
 
 function showLoader() { loader.style.opacity = '1'; loader.style.display = 'flex'; }
 function hideLoader() { loader.style.opacity = '0'; setTimeout(() => loader.style.display = 'none', 500); }
@@ -308,6 +370,7 @@ navItems.forEach(item => {
     item.onclick = (e) => {
         e.preventDefault();
         const type = item.dataset.type;
+        state.filters = { category: '', country: '', year: '' }; // Reset filters on navigation
         if (type === 'home') navigate('home');
         else navigate('list', { type });
     };
@@ -335,10 +398,11 @@ window.onscroll = () => {
 window.router = {
     home: () => navigate('home'),
     detail: (slug, data) => navigate('detail', { slug, detail: data }),
-    list: (type, keyword) => navigate('list', { type, keyword })
+    list: (type, keyword, filters) => navigate('list', { type, keyword, filters })
 };
 
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    await initFilters();
     navigate('home');
 });
