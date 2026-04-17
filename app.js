@@ -26,13 +26,53 @@ async function fetchAPI(endpoint) {
             headers: { 'accept': 'application/json' }
         });
         const data = await response.json();
-        hideLoader();
-        return data;
+        return data; // Loader is hidden by the renderer
     } catch (error) {
         console.error("API Error:", error);
         hideLoader();
         return null;
     }
+}
+
+// Check if a movie has any episodes with links
+async function getWatchableDetail(slug) {
+    try {
+        const response = await fetch(`${API_BASE}/phim/${slug}`, {
+            headers: { 'accept': 'application/json' }
+        });
+        const data = await response.json();
+        if (data && data.episodes && data.episodes.length > 0) {
+            const hasLinks = data.episodes.some(server => 
+                server.server_data && 
+                server.server_data.length > 0 && 
+                typeof server.server_data[0].link_embed === 'string' &&
+                server.server_data[0].link_embed.startsWith('http')
+            );
+            if (hasLinks) return data;
+        }
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+// Filter a list of movies by availability
+async function filterWatchableMovies(items) {
+    if (!items || items.length === 0) return [];
+    
+    // Fetch details in parallel to speed up verification
+    const results = await Promise.all(items.map(movie => getWatchableDetail(movie.slug)));
+    
+    // Map back: preserve original movie info but store the details too
+    return results
+        .map((fullData, index) => {
+            if (!fullData) return null;
+            return {
+                ...items[index],
+                fullData: fullData // This is the entire response object from /phim/[slug]
+            };
+        })
+        .filter(item => item !== null);
 }
 
 // --- Router ---
@@ -43,7 +83,7 @@ function navigate(view, params = {}) {
     if (view === 'home') {
         renderHome();
     } else if (view === 'detail') {
-        renderDetail(params.slug);
+        renderDetail(params.slug, params.detail);
     } else if (view === 'list') {
         renderList(params.type, params.keyword);
     }
@@ -54,16 +94,28 @@ function navigate(view, params = {}) {
 async function renderHome() {
     state.view = 'home';
     const data = await fetchAPI("/danh-sach/phim-moi-cap-nhat?page=1");
-    if (!data || !data.items) return;
+    if (!data || !data.items) {
+        hideLoader();
+        return;
+    }
 
-    const featured = data.items[0];
-    const latest = data.items.slice(1, 13);
+    // Filter to show only watchable movies
+    const watchableItems = await filterWatchableMovies(data.items);
+    hideLoader();
+
+    if (watchableItems.length === 0) {
+        appView.innerHTML = `<section><h2 class="section-title">Hiện tại không có phim nào mới có link xem.</h2></section>`;
+        return;
+    }
+
+    const featured = watchableItems[0];
+    const latest = watchableItems.slice(1, 13);
 
     appView.innerHTML = `
         <div class="hero">
             <div class="hero-bg" style="background-image: url('${featured.thumb_url}')"></div>
             <div class="hero-content animate-in">
-                <span class="hero-badge">Nổi Bật</span>
+                <span class="hero-badge">XEM NGAY</span>
                 <h1 class="hero-title">${featured.name}</h1>
                 <div class="hero-meta">
                     <span>${featured.year}</span>
@@ -71,18 +123,17 @@ async function renderHome() {
                     <span>${featured.origin_name || ''}</span>
                 </div>
                 <div class="hero-btns">
-                    <button class="btn btn-primary" onclick="window.router.detail('${featured.slug}')">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Xem Ngay
+                    <button class="btn btn-primary" onclick='window.router.detail("${featured.slug}", ${JSON.stringify(featured.fullData).replace(/'/g, "&apos;")})'>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Phát Phim
                     </button>
-                    <button class="btn btn-secondary" onclick="window.router.detail('${featured.slug}')">Thông Tin</button>
+                    <button class="btn btn-secondary" onclick='window.router.detail("${featured.slug}", ${JSON.stringify(featured.fullData).replace(/'/g, "&apos;")})'>Thông Tin</button>
                 </div>
             </div>
         </div>
 
         <section>
             <div class="section-header">
-                <h2 class="section-title">Phim Mới Cập Nhật</h2>
-                <a href="#" class="nav-item-link" onclick="window.router.list('all')">Xem tất cả</a>
+                <h2 class="section-title">Phim Mới Có Link Xem</h2>
             </div>
             <div class="movie-grid">
                 ${latest.map(movie => renderMovieCard(movie)).join('')}
@@ -93,9 +144,19 @@ async function renderHome() {
     updateActiveNavItem('home');
 }
 
-async function renderDetail(slug) {
-    const data = await fetchAPI(`/phim/${slug}`);
-    if (!data || !data.movie) return;
+async function renderDetail(slug, cachedData = null) {
+    let data = cachedData;
+    if (!data) {
+        data = await fetchAPI(`/phim/${slug}`);
+    } else {
+        showLoader(); 
+        setTimeout(hideLoader, 300);
+    }
+
+    if (!data || !data.movie) {
+        hideLoader();
+        return;
+    }
 
     const movie = data.movie;
     const episodes = data.episodes[0] ? data.episodes[0].server_data : [];
@@ -143,6 +204,7 @@ async function renderDetail(slug) {
             </div>
         </div>
     `;
+    hideLoader();
 }
 
 async function renderList(type, keyword = '') {
@@ -150,10 +212,10 @@ async function renderList(type, keyword = '') {
     let title = "Danh Sách Phim";
 
     if (keyword) {
-        endpoint = `/tim-kiem?keyword=${encodeURIComponent(keyword)}&limit=24`;
+        endpoint = `/tim-kiem?keyword=${encodeURIComponent(keyword)}&limit=24`; // Increase limit since we filter
         title = `Kết quả tìm kiếm: "${keyword}"`;
     } else if (type && type !== 'all') {
-        endpoint = `/danh-sach?type=${type}&limit=24`;
+        endpoint = `/danh-sach?type=${type}&limit=24&status=completed`; // Prefer completed for lists
         title = type === 'series' ? 'Phim Bộ Mới' : (type === 'hoathinh' ? 'Hoạt Hình Mới' : 'Phim Lẻ Mới');
     } else if (type === 'all') {
         endpoint = "/danh-sach/phim-moi-cap-nhat?limit=24";
@@ -163,16 +225,22 @@ async function renderList(type, keyword = '') {
     const data = await fetchAPI(endpoint);
     if (!data || !data.items) {
         appView.innerHTML = `<section><h2 class="section-title">Không tìm thấy phim yêu cầu.</h2></section>`;
+        hideLoader();
         return;
     }
+
+    // Filter to show only watchable movies
+    const watchableItems = await filterWatchableMovies(data.items);
+    hideLoader();
 
     appView.innerHTML = `
         <section style="margin-top: 80px;">
             <div class="section-header">
                 <h2 class="section-title">${title}</h2>
+                <div style="font-size: 0.8rem; color: var(--text-secondary);">Đã lọc bỏ phim chưa có link xem</div>
             </div>
             <div class="movie-grid">
-                ${data.items.length > 0 ? data.items.map(movie => renderMovieCard(movie)).join('') : '<p>Không có dữ liệu.</p>'}
+                ${watchableItems.length > 0 ? watchableItems.map(movie => renderMovieCard(movie)).join('') : '<p>Không có phim nào có link xem sẵn sàng.</p>'}
             </div>
         </section>
     `;
@@ -181,9 +249,12 @@ async function renderList(type, keyword = '') {
 }
 
 function renderMovieCard(movie) {
+    const detailAttr = movie.fullData ? `window.router.detail("${movie.slug}", ${JSON.stringify(movie.fullData).replace(/'/g, "&apos;")})` : `window.router.detail("${movie.slug}")`;
+    const poster = typeof movie.poster_url === 'string' ? movie.poster_url : (movie.thumb_url || '');
+
     return `
-        <div class="movie-card animate-in" onclick="window.router.detail('${movie.slug}')">
-            <img src="${movie.poster_url}" class="card-img" alt="${movie.name}" loading="lazy">
+        <div class="movie-card animate-in" onclick='${detailAttr}'>
+            <img src="${poster}" class="card-img" alt="${movie.name}" loading="lazy">
             <div class="card-overlay">
                 <div class="card-title">${movie.name}</div>
                 <div class="card-meta">
@@ -263,7 +334,7 @@ window.onscroll = () => {
 // Expose Router to Global
 window.router = {
     home: () => navigate('home'),
-    detail: (slug) => navigate('detail', { slug }),
+    detail: (slug, data) => navigate('detail', { slug, detail: data }),
     list: (type, keyword) => navigate('list', { type, keyword })
 };
 
