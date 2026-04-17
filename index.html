@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PhimLinhTinh - Xem Phim Online Chất Lượng Cao</title>
+    <meta name="description" content="PhimLinhTinh - Nền tảng xem phim trực tuyến miễn phí với hàng ngàn bộ phim bom tấn, hành động, lãng mạn và hoạt hình.">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Loading Overlay -->
+    <div id="loader">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Navigation -->
+    <nav id="navbar">
+        <div class="logo" id="logo-btn">PhimLinhTinh</div>
+        <div class="nav-links">
+            <a href="#" class="nav-item active" data-type="home">Trang Chủ</a>
+            <a href="#" class="nav-item" data-type="movie">Phim Lẻ</a>
+            <a href="#" class="nav-item" data-type="series">Phim Bộ</a>
+            <a href="#" class="nav-item" data-type="hoathinh">Hoạt Hình</a>
+        </div>
+        <div class="search-container">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="search-input" placeholder="Tìm tên phim...">
+        </div>
+    </nav>
+
+    <!-- App Container -->
+    <main id="app-view">
+        <!-- Views will be injected here -->
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2026 PhimLinhTinh. Dữ liệu từ vsmov.com. Thiết kế bởi Antigravity.</p>
+        <div style="margin-top: 1rem; font-size: 0.8rem;">
+            PhimLinhTinh không lưu trữ bất kỳ video nào trên máy chủ của mình. Tất cả nội dung được cung cấp bởi các bên thứ ba.
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="app.js"></script>
+</body>
+</html>
